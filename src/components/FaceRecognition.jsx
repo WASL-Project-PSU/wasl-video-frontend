@@ -6,6 +6,7 @@ const FaceRecognition = ({ onVerify, prisonerFaceDescriptor }) => {
   const [status, setStatus] = useState("loading");
   const [verificationStatus, setVerificationStatus] = useState(null);
   const intervalRef = useRef(null);
+  console.log("Face descriptor: ", prisonerFaceDescriptor)
 
   useEffect(() => {
     let isMounted = true;
@@ -128,7 +129,13 @@ const FaceRecognition = ({ onVerify, prisonerFaceDescriptor }) => {
         }
 
         if (prisonerFaceDescriptor && resizedDetections.length > 0) {
-          const prisonerDescriptor = new Float32Array(prisonerFaceDescriptor);
+          let descriptorData = prisonerFaceDescriptor;
+          if (typeof descriptorData === 'string') {
+            descriptorData = JSON.parse(descriptorData);
+          }
+          const prisonerDescriptor = new Float32Array(
+            Array.isArray(descriptorData) ? descriptorData : Object.values(descriptorData)
+          );
 
           resizedDetections.forEach((detection) => {
             const distance = window.faceapi.euclideanDistance(detection.descriptor, prisonerDescriptor);

@@ -21,7 +21,7 @@ export default function WaslVideoCall() {
   const meetingContainerRef = useRef(null);
   const meetingRef = useRef(null);
 
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3014';
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://wasl-session-service-production.up.railway.app';
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -503,7 +503,6 @@ export default function WaslVideoCall() {
           </div>
         )}
 
-        <p style={styles.footer}>Powered by Dyte</p>
       </div>
     </div>
   );
