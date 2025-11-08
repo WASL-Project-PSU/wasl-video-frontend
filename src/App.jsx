@@ -1,5 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Video, Users, LogOut, Loader2 } from 'lucide-react';
+import FaceRecognition from './components/FaceRecognition';
+import { getPrisonerById } from './lib/api';
 
 export default function WaslVideoCall() {
   const [view, setView] = useState('home');
@@ -11,6 +13,10 @@ export default function WaslVideoCall() {
   
   // NEW STATE to hold the auth token
   const [authToken, setAuthToken] = useState(null);
+  const [prisonerId, setPrisonerId] = useState(null);
+  const [prisonerData, setPrisonerData] = useState(null);
+  const [faceVerified, setFaceVerified] = useState(false);
+  const [loadingPrisoner, setLoadingPrisoner] = useState(false);
 
   const meetingContainerRef = useRef(null);
   const meetingRef = useRef(null);
@@ -26,16 +32,51 @@ export default function WaslVideoCall() {
       }
     }, 100);
 
-    // Check for authToken in URL
+    // Check for authToken and prisonerId in URL
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('authToken');
+    const pid = urlParams.get('prisonerId');
+    
     if (token) {
       setAuthToken(token);
+      if (pid) {
+        setPrisonerId(pid);
+        setView('faceVerification');
+        // Fetch prisoner data
+        fetchPrisonerData(pid);
+      } else {
       setView('meeting');
+      }
     }
 
     return () => clearInterval(interval);
   }, []);
+
+  const fetchPrisonerData = async (pid) => {
+    setLoadingPrisoner(true);
+    setError('');
+    try {
+      const prisoner = await getPrisonerById(pid);
+      setPrisonerData(prisoner);
+      if (!prisoner.faceDescriptor) {
+        setError('Prisoner face not enrolled. Cannot verify identity.');
+      }
+      setLoadingPrisoner(false);
+    } catch (err) {
+      console.error('Error fetching prisoner data:', err);
+      setError('Failed to load prisoner information. Please try again.');
+      setLoadingPrisoner(false);
+    }
+  };
+
+  const handleFaceVerified = () => {
+    setFaceVerified(true);
+    setLoadingPrisoner(false);
+    // Proceed to meeting after a short delay
+    setTimeout(() => {
+      setView('meeting');
+    }, 1500);
+  };
 
   // *** NEW useEffect to manage the meeting lifecycle ***
   useEffect(() => {
@@ -210,7 +251,80 @@ export default function WaslVideoCall() {
     setView('home');
     setMeetingId('');
     setError('');
+    setPrisonerId(null);
+    setPrisonerData(null);
+    setFaceVerified(false);
   };
+
+  if (view === 'faceVerification') {
+    return (
+      <div style={styles.mainContainer}>
+        <style>{cssStyles}</style>
+        <div style={styles.contentWrapper}>
+          <div style={styles.header}>
+            <div style={styles.iconCircle}>
+              <Video style={styles.icon} size={32} />
+            </div>
+            <h1 style={styles.title}>Face Verification Required</h1>
+            <p style={styles.subtitle}>
+              {prisonerData 
+                ? `Please verify your identity as ${prisonerData.name}`
+                : 'Loading prisoner information...'}
+            </p>
+          </div>
+
+          <div style={styles.card}>
+            {loadingPrisoner ? (
+              <div style={styles.loadingBox}>
+                <Loader2 style={styles.spinner} size={24} />
+                <span style={{marginLeft: '12px'}}>Loading prisoner data...</span>
+              </div>
+            ) : error ? (
+              <div style={styles.errorBox}>
+                {error}
+                <button
+                  onClick={() => {
+                    setError('');
+                    if (prisonerId) fetchPrisonerData(prisonerId);
+                  }}
+                  style={styles.primaryButton}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : prisonerData && prisonerData.faceDescriptor ? (
+              <div>
+                {faceVerified ? (
+                  <div style={styles.successBox}>
+                    <p style={{color: '#16a34a', fontWeight: 'bold', marginBottom: '16px'}}>
+                      ✓ Face verified successfully! Joining meeting...
+                    </p>
+                    <Loader2 style={styles.spinner} size={24} color="#16a34a" />
+                  </div>
+                ) : (
+                  <div>
+                    <FaceRecognition
+                      onVerify={handleFaceVerified}
+                      prisonerFaceDescriptor={prisonerData.faceDescriptor}
+                    />
+                    <div style={{marginTop: '16px', padding: '12px', backgroundColor: '#f0f9ff', borderRadius: '8px'}}>
+                      <p style={{fontSize: '14px', color: '#1e40af', margin: 0}}>
+                        Please position your face clearly in front of the camera for verification.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={styles.errorBox}>
+                Prisoner face data not available. Cannot proceed with verification.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (view === 'meeting') {
     return (
@@ -624,6 +738,14 @@ const styles = {
   },
   spinner: {
     animation: 'spin 1s linear infinite',
+  },
+  successBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '32px',
+    textAlign: 'center',
   },
 };
 
