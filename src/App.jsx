@@ -11,7 +11,6 @@ export default function WaslVideoCall() {
   const [error, setError] = useState('');
   const [scriptsLoaded, setScriptsLoaded] = useState(false);
   
-  // NEW STATE to hold the auth token
   const [authToken, setAuthToken] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [prisonerId, setPrisonerId] = useState(null);
@@ -33,24 +32,26 @@ export default function WaslVideoCall() {
       }
     }, 100);
 
-    // Check for authToken, sessionId, and prisonerId in URL
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('authToken');
     const sid = urlParams.get('sessionId');
     const pid = urlParams.get('prisonerId');
     
     if (token) {
+      console.log('URL_PARAMS: Auth token found in URL.');
       setAuthToken(token);
       if (sid) {
+        console.log(`URL_PARAMS: SessionId found: ${sid}`);
         setSessionId(sid);
       }
       if (pid) {
+        console.log(`URL_PARAMS: PrisonerId found: ${pid}. Setting view to faceVerification.`);
         setPrisonerId(pid);
         setView('faceVerification');
-        // Fetch prisoner data
         fetchPrisonerData(pid);
       } else {
-      setView('meeting');
+        console.log('URL_PARAMS: No prisonerId. Setting view to meeting.');
+        setView('meeting');
       }
     }
 
@@ -58,78 +59,79 @@ export default function WaslVideoCall() {
   }, []);
 
   const fetchPrisonerData = async (pid) => {
+    console.log(`FETCH_PRISONER: Fetching data for prisonerId: ${pid}`);
     setLoadingPrisoner(true);
     setError('');
     try {
       const prisoner = await getPrisonerById(pid);
       setPrisonerData(prisoner);
       if (!prisoner.faceDescriptor) {
+        console.warn(`FETCH_PRISONER: Prisoner ${pid} has no face descriptor enrolled.`);
         setError('Prisoner face not enrolled. Cannot verify identity.');
+      } else {
+        console.log(`FETCH_PRISONER: Successfully fetched data for prisoner ${pid}.`);
       }
       setLoadingPrisoner(false);
     } catch (err) {
-      console.error('Error fetching prisoner data:', err);
+      console.error(`❌ FETCH_PRISONER: Error fetching data for prisoner ${pid}:`, err);
       setError('Failed to load prisoner information. Please try again.');
       setLoadingPrisoner(false);
     }
   };
 
   const handleFaceVerified = () => {
+    console.log('FACE_VERIFIED: Identity confirmed. Proceeding to meeting.');
     setFaceVerified(true);
     setLoadingPrisoner(false);
-    // Proceed to meeting after a short delay
     setTimeout(() => {
       setView('meeting');
     }, 1500);
   };
 
-  // Notify backend that session has ended
   const notifySessionEnd = async (sid) => {
-    if (!sid) return;
+    console.log(`NOTIFY_SESSION_END: Attempting to notify backend for sessionId: ${sid}`);
+    if (!sid) {
+      console.warn('NOTIFY_SESSION_END: Aborted, no sessionId provided.');
+      return;
+    }
     try {
       const response = await fetch(`${API_BASE_URL}/api/sessions/${sid}/end`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
       const data = await response.json();
-      if (data.success) {
-        console.log('✓ Session end time updated in backend');
+      if (response.ok && data.success) {
+        console.log(`✓ NOTIFY_SESSION_END: Successfully updated session ${sid} end time.`);
       } else {
-        console.warn('Failed to update session end time:', data.message);
+        console.warn(`⚠️ NOTIFY_SESSION_END: Failed to update session end time for ${sid}. Status: ${response.status}, Message: ${data.message}`);
       }
     } catch (err) {
-      console.error('Error notifying backend of session end:', err);
-      // Don't throw - this is not critical for the user experience
+      console.error(`❌ NOTIFY_SESSION_END: Network error while notifying backend for session ${sid}:`, err);
     }
   };
 
-  // *** NEW useEffect to manage the meeting lifecycle ***
   useEffect(() => {
-    // This effect runs when we enter the 'meeting' view and have an authToken
     if (view === 'meeting' && authToken) {
       
       const initMeeting = async () => {
         try {
           console.log('=== Starting Meeting Initialization ===');
-          console.log('DyteClient available:', !!window.DyteClient);
+          console.log('INIT_MEETING: DyteClient available:', !!window.DyteClient);
           
           if (!window.DyteClient) {
             throw new Error('DyteClient not loaded. Please refresh the page.');
           }
           
-          // Show loader while initializing
           setLoading(true);
 
-          // We no longer need the setTimeout, React will ensure ref is current
           if (!meetingContainerRef.current) {
-            // This might happen on a fast re-render, wait a tick
             await new Promise(resolve => setTimeout(resolve, 0));
             if (!meetingContainerRef.current) {
                throw new Error('Meeting container not found');
             }
           }
 
-          console.log('Calling DyteClient.init...');
+          console.log('INIT_MEETING: Calling DyteClient.init...');
           
           const meeting = await window.DyteClient.init({
             authToken,
@@ -139,7 +141,6 @@ export default function WaslVideoCall() {
               audio: true, video: true, screenShare: true,
               chat: true, polls: true, participants: true
             },
-            // Add ICE server configuration
             rtcConfiguration: {
               iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' },
@@ -149,46 +150,45 @@ export default function WaslVideoCall() {
             }
           });
 
-          console.log('Meeting object created:', meeting);
+          console.log('INIT_MEETING: Meeting object created:', meeting);
           meetingRef.current = meeting;
           setLoading(false);
-          // Listen to meeting events
+
           meeting.self.on('roomJoined', () => {
-            console.log('✓✓✓ Room joined successfully ✓✓✓');
-            setLoading(false); // Hide loader *after* joining
-            // Note: startTime is already set in backend when joinSession is called
+            console.log('✓✓✓ EVENT: "roomJoined" - Room joined successfully ✓✓✓');
+            setLoading(false);
           });
           
           meeting.self.on('roomLeft', () => {
-            console.log('⚠️ Room left');
-            // Notify backend that session ended
+            console.log('EVENT: "roomLeft" event received.');
+            // This is the primary mechanism for ending the session.
             if (sessionId) {
-              notifySessionEnd(sessionId).catch(err => {
-                console.error('Failed to notify backend of session end:', err);
-              });
+              notifySessionEnd(sessionId);
+            } else {
+              console.warn('EVENT: "roomLeft" - No sessionId available to notify backend.');
             }
           });
           
           meeting.self.on('roomConnectionFailed', (error) => {
-            console.error('❌ Room connection failed:', error);
+            console.error('❌ EVENT: "roomConnectionFailed" -', error);
             setError('Failed to connect to meeting room.');
             setLoading(false);
           });
           
-          console.log('Creating and adding Dyte UI element...');
-          meetingContainerRef.current.innerHTML = ''; // Clear previous UI
+          console.log('INIT_MEETING: Creating and adding Dyte UI element...');
+          meetingContainerRef.current.innerHTML = '';
           
           const ui = document.createElement('dyte-meeting');
           ui.meeting = meeting;
           ui.showSetupScreen = true;
           
           meetingContainerRef.current.appendChild(ui);
-          console.log('✓ UI element added to DOM');
+          console.log('✓ INIT_MEETING: UI element added to DOM');
           
         } catch (err) {
           setError('Failed to initialize meeting: ' + err.message);
-          console.error('❌ Meeting initialization error:', err);
-          setView('home'); // Go back home on error
+          console.error('❌ INIT_MEETING: Meeting initialization error:', err);
+          setView('home');
           setAuthToken(null);
           setLoading(false);
         }
@@ -196,35 +196,37 @@ export default function WaslVideoCall() {
       
       initMeeting();
       
-      // *** THIS IS THE CRITICAL CLEANUP FUNCTION ***
       return () => {
-        console.log('Running meeting cleanup...');
+        console.log('EFFECT_CLEANUP: Running meeting cleanup...');
         if (meetingRef.current) {
+          console.log('EFFECT_CLEANUP: Meeting object exists. Calling leaveRoom().');
           try {
+            // This will trigger the 'roomLeft' event listener we set up
             meetingRef.current.leaveRoom();
-            console.log('... room left.');
-            // Note: roomLeft event handler will notify backend
+            console.log('EFFECT_CLEANUP: leaveRoom() called successfully.');
           } catch (err) {
-            console.error('... error leaving room:', err);
-            // If leaveRoom fails, still try to notify backend
+            console.error('❌ EFFECT_CLEANUP: Error calling leaveRoom(). Manually notifying backend.', err);
+            // Fallback in case leaveRoom() fails synchronously
             if (sessionId) {
-              notifySessionEnd(sessionId).catch(err => {
-                console.error('Failed to notify backend of session end:', err);
-              });
+              notifySessionEnd(sessionId);
             }
           }
           meetingRef.current = null;
+        } else {
+            console.log('EFFECT_CLEANUP: No meeting object to clean up.');
         }
+
         if (meetingContainerRef.current) {
           meetingContainerRef.current.innerHTML = '';
+          console.log('EFFECT_CLEANUP: Meeting container cleared.');
         }
-        setAuthToken(null); // Clear the token
+        setAuthToken(null);
         setLoading(false);
+        console.log('EFFECT_CLEANUP: State cleared (authToken, loading).');
       };
     }
-  }, [view, authToken, sessionId]); // Dependencies: This effect re-runs if view, authToken, or sessionId changes
+  }, [view, authToken, sessionId]);
 
-  // *** SIMPLIFIED createMeeting ***
   const createMeeting = async () => {
     if (!userName.trim()) {
       setError('Please enter your name');
@@ -243,8 +245,8 @@ export default function WaslVideoCall() {
 
       if (data.success) {
         setMeetingId(data.meetingId);
-        setAuthToken(data.authToken); // Set token
-        setView('meeting'); // Set view
+        setAuthToken(data.authToken);
+        setView('meeting');
       } else {
         setError(data.error || 'Failed to create meeting');
       }
@@ -252,11 +254,9 @@ export default function WaslVideoCall() {
       setError('Failed to connect to server. Make sure backend is running.');
       console.error(err);
     }
-    // We stop loading *after* the fetch, the useEffect will handle loading for init
     setLoading(false);
   };
 
-  // *** SIMPLIFIED joinMeeting ***
   const joinMeeting = async () => {
     if (!userName.trim() || !meetingId.trim()) {
       setError('Please enter your name and meeting ID');
@@ -274,8 +274,8 @@ export default function WaslVideoCall() {
       console.log('Join meeting response:', data);
 
       if (data.success) {
-        setAuthToken(data.authToken); // Set token
-        setView('meeting'); // Set view
+        setAuthToken(data.authToken);
+        setView('meeting');
       } else {
         setError(data.error || 'Failed to join meeting');
       }
@@ -286,14 +286,10 @@ export default function WaslVideoCall() {
     setLoading(false);
   };
 
-  // *** SIMPLIFIED leaveMeeting ***
   const leaveMeeting = async () => {
-    // Notify backend that session ended before cleaning up
-    if (sessionId) {
-      await notifySessionEnd(sessionId);
-    }
-    
-    // Just setting the view will trigger the useEffect cleanup
+    console.log('LEAVE_MEETING: User clicked leave button.');
+    // The useEffect cleanup logic is now the single source of truth for leaving.
+    // We just need to change the view to trigger it.
     setView('home');
     setMeetingId('');
     setError('');
@@ -301,6 +297,7 @@ export default function WaslVideoCall() {
     setPrisonerId(null);
     setPrisonerData(null);
     setFaceVerified(false);
+    console.log('LEAVE_MEETING: View changed to "home", cleanup should be triggered.');
   };
 
   if (view === 'faceVerification') {
@@ -377,7 +374,6 @@ export default function WaslVideoCall() {
     return (
       <div style={styles.meetingView}>
         <style>{cssStyles}</style>
-        {/* Show loader while meeting is joining */}
         {loading && (
           <div style={styles.meetingLoader}>
             <Loader2 style={styles.spinner} size={48} color="white" />
@@ -390,13 +386,11 @@ export default function WaslVideoCall() {
             <span style={styles.buttonText}>Leave Meeting</span>
           </button>
         </div>
-        {/* This container will be filled by the useEffect */}
         <div ref={meetingContainerRef} style={styles.meetingContainer} />
       </div>
     );
   }
 
-  // ... (rest of the home/join view JSX is identical, no changes needed)
   return (
     <div style={styles.mainContainer}>
       <style>{cssStyles}</style>
@@ -555,7 +549,6 @@ export default function WaslVideoCall() {
   );
 }
 
-// Add this new style for the in-meeting loader
 const styles = {
   meetingLoader: {
     position: 'absolute',
@@ -568,7 +561,7 @@ const styles = {
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 100, // Above the button, below nothing
+    zIndex: 100,
   },
   meetingView: {
     minHeight: '100vh',
@@ -581,7 +574,6 @@ const styles = {
     right: '16px',
     zIndex: 50,
   },
-  // ... (rest of the styles are identical, no changes needed)
   leaveButton: {
     display: 'flex',
     alignItems: 'center',
@@ -795,8 +787,6 @@ const styles = {
   },
 };
 
-
-// CSS Styles (no change)
 const cssStyles = `
   @keyframes spin {
     from {
