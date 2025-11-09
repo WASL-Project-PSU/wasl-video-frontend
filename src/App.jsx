@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import './App.css';
 import { Video, Users, LogOut, Loader2 } from 'lucide-react';
 import FaceRecognition from './components/FaceRecognition';
 import { getPrisonerById } from './lib/api';
